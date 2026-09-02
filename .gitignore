@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+planner.db
+*.db-journal
+apps/frontend/node_modules/
+apps/frontend/dist/
+apps/desktop/target/
+backend/migrations/versions/__pycache__/
