@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session, delete, select
 
@@ -36,7 +36,7 @@ def recompute_schedule(session: Session, reason: str = "manual") -> ScheduleRun:
         session.add(StudyBlock(assignment_id=assignment.id, title=assignment.title, start_at=proposal.start, end_at=proposal.end, schedule_run_id=run.id))
         session.add(ScheduleDecision(schedule_run_id=run.id, assignment_id=assignment.id, decision="PLACED", score=proposal.score, explanation=f"Placed before {assignment.due_at:%a %I:%M %p}; conflicts and the safety buffer were respected."))
         assignment.state = AssignmentState.SCHEDULED
-        assignment.updated_at = datetime.utcnow()
+        assignment.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     for assignment in assignments:
         placed_minutes = sum(int((b.end - b.start).total_seconds() / 60) for b in proposed if b.assignment_id == assignment.id)
         locked_minutes = sum(int((b.end_at - b.start_at).total_seconds() / 60) for b in locked_study if b.assignment_id == assignment.id)

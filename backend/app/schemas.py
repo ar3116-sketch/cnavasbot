@@ -49,3 +49,12 @@ class BlockPatch(BaseModel):
     end_at: Optional[datetime] = None
     locked: Optional[bool] = None
     completed: Optional[bool] = None
+
+
+class CalibrationSubmission(BaseModel):
+    answers: list[str]
+    demo_scores: Optional[list[float]] = None
+
+
+class CanvasScanRequest(BaseModel):
+    integrity_scan: bool = False

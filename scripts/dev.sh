@@ -7,8 +7,19 @@ FALLBACK_BIN="/Users/advaith/.cache/codex-runtimes/codex-primary-runtime/depende
 export PATH="$NODE_BIN:$FALLBACK_BIN:$PATH"
 
 cd "$ROOT_DIR"
+if [[ -n "${CADENCE_PYTHON:-}" ]]; then
+  PYTHON_BIN="$CADENCE_PYTHON"
+elif [[ -x .venv/bin/python ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+  echo "Cadence requires Python 3.10 or newer. Set CADENCE_PYTHON to a compatible interpreter." >&2
+  exit 1
+fi
 if [[ ! -x .venv/bin/uvicorn ]]; then
-  python3 -m venv .venv
+  "$PYTHON_BIN" -m venv .venv
   .venv/bin/pip install -r backend/requirements.txt
 fi
 

@@ -3,9 +3,32 @@ from datetime import datetime, time, timedelta
 from sqlmodel import Session, select
 
 from .models import (
-    Assignment, AssignmentState, BlockKind, CalendarEvent, Course, MasteryRecord,
-    RiskLevel, SyncRun, Topic, UserPreferences, utcnow,
+    Assignment, AssignmentState, BlockKind, CalendarEvent, CanvasWorkerState, Course,
+    DomainEvent, MasteryRecord, RiskLevel, SyncRun, Topic, UserPreferences, utcnow,
+    ModelRoute, ProviderConfiguration,
 )
+from .llm.routing import ModelTask
+
+
+def seed_provider_routes(session: Session) -> None:
+    demo = session.exec(select(ProviderConfiguration).where(ProviderConfiguration.provider == "demo-brain")).first()
+    if not demo:
+        demo = ProviderConfiguration(provider="demo-brain", model="deterministic-v1")
+        session.add(demo)
+        session.commit()
+        session.refresh(demo)
+    canvas = session.exec(select(ProviderConfiguration).where(ProviderConfiguration.provider == "zai")).first()
+    if not canvas:
+        canvas = ProviderConfiguration(provider="zai", model="glm-5.3-flash", base_url="https://api.z.ai/api/paas/v4", credential_key="zai_api_key")
+        session.add(canvas)
+        session.commit()
+        session.refresh(canvas)
+    for task in ModelTask:
+        if session.exec(select(ModelRoute).where(ModelRoute.task == task.value)).first():
+            continue
+        target = canvas if task == ModelTask.CANVAS_COMPUTER_USE else demo
+        session.add(ModelRoute(task=task.value, provider_configuration_id=target.id))
+    session.commit()
 
 
 def _at(day_offset: int, hour: int, minute: int = 0) -> datetime:
@@ -14,6 +37,7 @@ def _at(day_offset: int, hour: int, minute: int = 0) -> datetime:
 
 
 def seed_demo(session: Session) -> None:
+    seed_provider_routes(session)
     if session.exec(select(Course)).first():
         return
 
@@ -63,5 +87,8 @@ def seed_demo(session: Session) -> None:
         MasteryRecord(topic_id=topics[3].id, mastery_score=.68, confidence=.48, evidence_count=3),
         UserPreferences(),
         SyncRun(provider="demo", status="SUCCESS", changes=4, finished_at=utcnow()),
+        CanvasWorkerState(status="DEMO", session_status="NOT_CONFIGURED", last_scan_at=utcnow(), next_scan_at=utcnow() + timedelta(hours=8), last_result="Demo data loaded", courses_observed=3),
+        DomainEvent(event_type="canvas.scan.completed", payload={"changes": 4, "mode": "demo"}),
+        DomainEvent(event_type="study_plan.updated", payload={"blocks": 3, "reason": "demo startup"}),
     ])
     session.commit()

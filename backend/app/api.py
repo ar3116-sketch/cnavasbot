@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from .database import get_session
-from .models import Assignment, AssignmentState, CalendarEvent, Course, MasteryRecord, StudyBlock, SyncRun, Topic
-from .schemas import AssignmentRead, BlockPatch, CalendarItemRead, CourseRead, ScheduleRequest
+from .canvas.reconcile import reconcile_scan
+from .canvas.schemas import CanvasScanResult
+from .models import Assignment, AssignmentState, BackgroundJob, CalendarEvent, CanvasWorkerState, Course, DomainEvent, MasteryRecord, StudyBlock, SyncRun, Topic
+from .pipeline import complete_demo_calibration, ensure_calibration
+from .schemas import AssignmentRead, BlockPatch, CalendarItemRead, CalibrationSubmission, CanvasScanRequest, CourseRead, ScheduleRequest
 from .services import recompute_schedule
 
 
@@ -71,6 +75,64 @@ def dashboard(session: Session = Depends(get_session)):
     calibration = [a for a in all_assignments if a.state == AssignmentState.AWAITING_CALIBRATION]
     scheduled = sum(a.scheduled_minutes for a in all_assignments if a.due_at >= datetime.now())
     return {"assignments": all_assignments, "events": events, "calibration_count": len(calibration), "high_risk_count": sum(a.risk == "HIGH" for a in all_assignments), "scheduled_minutes": scheduled}
+
+
+@router.get("/activity")
+def activity(limit: int = 50, session: Session = Depends(get_session)):
+    events = session.exec(select(DomainEvent).order_by(DomainEvent.created_at.desc()).limit(min(max(limit, 1), 200))).all()
+    return [{"id": event.id, "type": event.event_type, "entity_type": event.entity_type, "entity_id": event.entity_id, "payload": event.payload, "created_at": event.created_at, "correlation_id": event.correlation_id} for event in events]
+
+
+@router.get("/canvas/status")
+def canvas_status(session: Session = Depends(get_session)):
+    state = session.exec(select(CanvasWorkerState)).first()
+    if not state:
+        return {"status": "DISCONNECTED", "session_status": "NOT_CONFIGURED", "last_scan_at": None, "next_scan_at": None, "courses_observed": 0, "last_result": "Connect Canvas to begin"}
+    return state
+
+
+@router.post("/canvas/scans")
+def ingest_canvas_scan(scan: CanvasScanResult, session: Session = Depends(get_session)):
+    return reconcile_scan(session, scan)
+
+
+@router.post("/canvas/scan-requests")
+def request_canvas_scan(payload: CanvasScanRequest, session: Session = Depends(get_session)):
+    active = session.exec(select(BackgroundJob).where(BackgroundJob.job_type.in_(["canvas.scan", "canvas.daily_integrity_scan"]), BackgroundJob.status.in_(["PENDING", "RUNNING"]))).first()
+    if active:
+        return {"job_id": active.id, "status": active.status, "deduplicated": True}
+    job = BackgroundJob(job_key=f"canvas.scan:{uuid4()}", job_type="canvas.daily_integrity_scan" if payload.integrity_scan else "canvas.scan", payload=payload.model_dump())
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return {"job_id": job.id, "status": job.status, "deduplicated": False}
+
+
+@router.get("/assignments/{assignment_id}/calibration")
+def get_calibration(assignment_id: int, session: Session = Depends(get_session)):
+    from .models import Calibration, CalibrationQuestion
+    calibration = session.exec(select(Calibration).where(Calibration.assignment_id == assignment_id).order_by(Calibration.id.desc())).first()
+    assignment = session.get(Assignment, assignment_id)
+    if not calibration and assignment and assignment.state == AssignmentState.AWAITING_CALIBRATION:
+        calibration = ensure_calibration(session, assignment)
+    if not calibration:
+        raise HTTPException(status_code=404, detail="Calibration not found")
+    questions = session.exec(select(CalibrationQuestion).where(CalibrationQuestion.calibration_id == calibration.id).order_by(CalibrationQuestion.position)).all()
+    return {"id": calibration.id, "status": calibration.status, "questions": [{"id": q.id, "position": q.position, "dimension": q.dimension, "prompt": q.prompt, "topics": q.expected_topics} for q in questions]}
+
+
+@router.post("/assignments/{assignment_id}/calibration")
+def submit_calibration(assignment_id: int, payload: CalibrationSubmission, session: Session = Depends(get_session)):
+    assignment = session.get(Assignment, assignment_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    try:
+        from .llm.mock import DemoBrainProvider
+        scores = payload.demo_scores if payload.demo_scores is not None else DemoBrainProvider().grade_calibration(payload.answers)
+        calibration, run = complete_demo_calibration(session, assignment, payload.answers, scores)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"calibration_id": calibration.id, "classification": calibration.mastery_classification, "overall_score": calibration.overall_score, "estimated_minutes": assignment.estimated_minutes, "schedule_run_id": run.id, "blocks_created": run.blocks_created}
 
 
 @router.post("/schedule/recompute")
