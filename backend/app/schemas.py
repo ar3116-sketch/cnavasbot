@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import AssignmentState, BlockKind, RiskLevel
 
@@ -58,3 +58,7 @@ class CalibrationSubmission(BaseModel):
 
 class CanvasScanRequest(BaseModel):
     integrity_scan: bool = False
+
+
+class ProviderSelection(BaseModel):
+    model: str = Field(min_length=1, max_length=200)

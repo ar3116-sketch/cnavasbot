@@ -4,11 +4,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CanvasSession } from './canvas-session.js'
 import { CredentialVault } from './credential-vault.js'
+import { ProviderCatalog } from './provider-catalog.js'
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(currentDir, '../../../..')
 const canvasSession = new CanvasSession()
 const credentialVault = new CredentialVault()
+const providerCatalog = new ProviderCatalog(credentialVault)
 let backend: ChildProcess | null = null
 
 function startBackend() {
@@ -37,8 +39,9 @@ function createWindow() {
 
 ipcMain.handle('canvas:connect', () => canvasSession.connect())
 ipcMain.handle('canvas:status', () => canvasSession.getStatus())
-ipcMain.handle('credential:set', async (_event, key: string, value: string) => { await credentialVault.set(key, value); return { stored: true } })
-ipcMain.handle('credential:has', (_event, key: string) => credentialVault.has(key))
+ipcMain.handle('provider:save-key', async (_event, provider: string, apiKey: string) => { await providerCatalog.saveKey(provider, apiKey); return { stored: true } })
+ipcMain.handle('provider:has-key', (_event, provider: string) => providerCatalog.hasKey(provider))
+ipcMain.handle('provider:list-models', (_event, provider: string) => providerCatalog.listModels(provider))
 
 app.whenReady().then(() => { startBackend(); createWindow(); app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() }) })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

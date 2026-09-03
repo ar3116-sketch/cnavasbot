@@ -10,9 +10,10 @@ from sqlmodel import Session, select
 from .database import get_session
 from .canvas.reconcile import reconcile_scan
 from .canvas.schemas import CanvasScanResult
-from .models import Assignment, AssignmentState, BackgroundJob, CalendarEvent, CanvasWorkerState, Course, DomainEvent, MasteryRecord, StudyBlock, SyncRun, Topic
+from .models import Assignment, AssignmentState, BackgroundJob, CalendarEvent, CanvasWorkerState, Course, DomainEvent, MasteryRecord, ModelRoute, ProviderConfiguration, StudyBlock, SyncRun, Topic
+from .llm.routing import ModelTask
 from .pipeline import complete_demo_calibration, ensure_calibration
-from .schemas import AssignmentRead, BlockPatch, CalendarItemRead, CalibrationSubmission, CanvasScanRequest, CourseRead, ScheduleRequest
+from .schemas import AssignmentRead, BlockPatch, CalendarItemRead, CalibrationSubmission, CanvasScanRequest, CourseRead, ProviderSelection, ScheduleRequest
 from .services import recompute_schedule
 
 
@@ -89,6 +90,37 @@ def canvas_status(session: Session = Depends(get_session)):
     if not state:
         return {"status": "DISCONNECTED", "session_status": "NOT_CONFIGURED", "last_scan_at": None, "next_scan_at": None, "courses_observed": 0, "last_result": "Connect Canvas to begin"}
     return state
+
+
+@router.get("/providers")
+def providers(session: Session = Depends(get_session)):
+    items = session.exec(select(ProviderConfiguration).order_by(ProviderConfiguration.provider)).all()
+    return [{"provider": item.provider, "model": item.model, "base_url": item.base_url} for item in items]
+
+
+@router.put("/providers/{provider}")
+def select_brain_provider(provider: str, payload: ProviderSelection, session: Session = Depends(get_session)):
+    if provider not in {"openai", "anthropic"}:
+        raise HTTPException(status_code=422, detail="Unsupported Brain provider")
+    configuration = session.exec(select(ProviderConfiguration).where(ProviderConfiguration.provider == provider)).first()
+    if not configuration:
+        configuration = ProviderConfiguration(provider=provider, model=payload.model, credential_key=f"{provider}_api_key")
+        session.add(configuration)
+        session.flush()
+    else:
+        configuration.model = payload.model
+        configuration.credential_key = f"{provider}_api_key"
+    for task in ModelTask:
+        if task == ModelTask.CANVAS_COMPUTER_USE:
+            continue
+        route = session.exec(select(ModelRoute).where(ModelRoute.task == task.value)).first()
+        if route:
+            route.provider_configuration_id = configuration.id
+            session.add(route)
+        else:
+            session.add(ModelRoute(task=task.value, provider_configuration_id=configuration.id))
+    session.commit()
+    return {"provider": configuration.provider, "model": configuration.model, "brain_routes_updated": len(ModelTask) - 1}
 
 
 @router.post("/canvas/scans")

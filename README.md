@@ -22,13 +22,14 @@ Demo mode runs that path without network calls or API credits. Live Rutgers acce
 - Electron desktop shell with a narrow, sandboxed preload bridge
 - Persistent Playwright Canvas session, configurable Rutgers-only origins, and explicit password-field protection
 - Encrypted provider-secret vault backed by Electron `safeStorage`; raw keys never enter SQLite
+- Settings-based OpenAI/Anthropic model picker that loads the models available to the entered API key
 - FastAPI/SQLModel service, SQLite migrations, durable jobs, domain events, and worker health
 - Stable Canvas URL identity, duplicate prevention, change detection, and scan failure/auth states
 - Credential-free demo Brain for assignment analysis, three-question calibration, and explainable time estimates
 - Deterministic scheduling with conflicts, protected blocks, split limits, and deadline safety buffers
 - Today, Calendar, Assignments, Mastery, Activity, Settings, Canvas status, and calibration UI
 - MCP 2.x server over stdio or loopback Streamable HTTP, with safe read tools and token-gated scan requests
-- 22 unit/integration tests plus TypeScript compilation and frontend linting
+- 23 unit/integration tests plus TypeScript compilation and frontend linting
 
 The live Z.AI computer-use network adapter is intentionally not faked: public provider documentation does not currently define a stable GLM-5.3-Flash computer-use wire contract. The provider interface, constrained action executor, prompt, managed browser, scan schema, and downstream pipeline are ready for that adapter once a verified account/API contract is available. Remote MCP, provider-backed Brain grading, native notifications, study timers, and signed installers remain on the task ledger.
 
@@ -48,6 +49,8 @@ pnpm dev
 `pnpm dev` starts the Electron app, the React dev server, and the local Python service. For browser-only UI development, run `./scripts/dev.sh` and open `http://127.0.0.1:5173`.
 
 Use **Connect Canvas** inside the desktop app. A managed browser opens for manual Rutgers authentication. Configure allowed authentication redirects through `CANVAS_ALLOWED_ORIGINS`; autonomous actions outside that list are rejected.
+
+Use **Settings → Academic Brain** to choose OpenAI or Anthropic, enter an API key, load the models available to that key, and select the model Cadence should route semantic tasks to. The key is encrypted by Electron in the operating-system-backed vault; only the provider and model selection are stored in SQLite.
 
 ## Local services
 

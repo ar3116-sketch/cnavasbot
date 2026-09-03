@@ -21,3 +21,13 @@ def test_recompute_returns_explainable_summary():
         assert response.status_code == 200
         assert response.json()["status"] == "COMPLETED"
         assert response.json()["blocks_created"] >= 1
+
+
+def test_brain_model_selection_persists_without_exposing_secret_reference():
+    with TestClient(app) as client:
+        response = client.put("/api/v1/providers/openai", json={"model": "gpt-test-model"})
+        assert response.status_code == 200
+        assert response.json()["model"] == "gpt-test-model"
+        assert "credential_key" not in response.json()
+        providers = client.get("/api/v1/providers").json()
+        assert all("api_key" not in str(item).lower() for item in providers)

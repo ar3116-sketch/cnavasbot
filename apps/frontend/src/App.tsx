@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, ArrowRight, BarChart3, Bell, BookOpen, CalendarDays, Check,
   ChevronLeft, ChevronRight, CircleGauge, Clock3, Cloud, GraduationCap,
-  History, LayoutDashboard, ListTodo, LockKeyhole, Menu, Moon, Play, Plus, RefreshCw,
+  Bot, History, KeyRound, LayoutDashboard, ListTodo, LockKeyhole, Menu, Moon, Play, Plus, RefreshCw,
   Settings, ShieldCheck, Sparkles, Sun, Target, Wifi, X,
 } from 'lucide-react'
 import { addDays, differenceInMinutes, format, isSameDay, startOfWeek } from 'date-fns'
@@ -33,6 +33,9 @@ type ActivityEvent = {
   id: number; type: string; entity_type: string | null; entity_id: string | null
   payload: Record<string, unknown>; created_at: string
 }
+type ProviderId = 'openai' | 'anthropic'
+type ProviderModel = { id: string; label: string }
+type ProviderConfiguration = { provider: string; model: string; base_url: string | null }
 type NavItem = 'Today' | 'Calendar' | 'Assignments' | 'Mastery' | 'Activity' | 'Settings'
 
 const API = 'http://localhost:8000/api/v1'
@@ -150,8 +153,73 @@ function ActivityView({ events }: { events: ActivityEvent[] }) {
   return <div className="full-view"><div className="view-intro"><div><span className="eyebrow">AUDIT TRAIL</span><h2>Every meaningful change, visible.</h2><p>Worker observations become normalized events before they can affect your plan.</p></div></div><section className="panel activity-card">{events.length === 0 && <div className="activity-empty">No changes recorded yet.</div>}{events.map(event => <article className="activity-row" key={event.id}><div className="activity-mark"><History size={15} /></div><div><strong>{stateLabel(event.type.replaceAll('.', '_'))}</strong><span>{event.entity_type ? `${stateLabel(event.entity_type)} ${event.entity_id || ''}` : 'System event'}</span></div><time>{format(new Date(event.created_at), 'MMM d · h:mm a')}</time></article>)}</section></div>
 }
 
-function SettingsView({ canvasStatus, onConnect }: { canvasStatus: CanvasStatus; onConnect: () => void }) {
-  return <div className="full-view"><div className="view-intro"><div><span className="eyebrow">PREFERENCES</span><h2>Shape the rules. Keep control.</h2><p>Deterministic scheduling honors these boundaries every time.</p></div></div><section className="panel settings-card"><div className="setting"><div><strong>Day boundary</strong><span>Study blocks may be placed between these hours.</span></div><div className="field-pair"><button>8:00 AM</button><span>to</span><button>10:00 PM</button></div></div><div className="setting"><div><strong>Maximum focus block</strong><span>Longer work is split into sustainable sessions.</span></div><button>90 minutes</button></div><div className="setting"><div><strong>Deadline safety buffer</strong><span>Finish comfortably before the real deadline.</span></div><button>12 hours</button></div><div className="setting privacy-setting"><div><strong><ShieldCheck size={15} /> Local-first privacy</strong><span>Credentials stay encrypted in the desktop vault. Models receive only the minimum task context.</span></div><b>On device</b></div><div className="integration-row"><div><span className="integration-icon">C</span><p><strong>Canvas LMS</strong><small>{canvasStatus.status === 'CONNECTED' ? 'Managed browser session connected' : 'Manual sign-in · no Canvas API token'}</small></p></div><button onClick={onConnect}>{canvasStatus.status === 'CONNECTED' ? 'Open session' : 'Connect'}</button></div></section></div>
+function ModelProviderSettings({ onMessage }: { onMessage: (message: string) => void }) {
+  const [provider, setProvider] = useState<ProviderId>('openai')
+  const [apiKey, setApiKey] = useState('')
+  const [models, setModels] = useState<ProviderModel[]>([])
+  const [model, setModel] = useState('')
+  const [savedModels, setSavedModels] = useState<Partial<Record<ProviderId, string>>>({})
+  const [hasKey, setHasKey] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    fetch(`${API}/providers`).then(response => response.json()).then((configurations: ProviderConfiguration[]) => {
+      if (!active) return
+      const saved: Partial<Record<ProviderId, string>> = {}
+      for (const configuration of configurations) {
+        if (configuration.provider === 'openai' || configuration.provider === 'anthropic') saved[configuration.provider] = configuration.model
+      }
+      setSavedModels(saved)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    if (!window.academicOS) return
+    window.academicOS.providers.hasKey(provider).then(value => { if (active) setHasKey(value) }).catch(() => { if (active) setHasKey(false) })
+    return () => { active = false }
+  }, [provider])
+
+  const changeProvider = (nextProvider: ProviderId) => {
+    setProvider(nextProvider); setModels([]); setModel(''); setApiKey(''); setHasKey(false)
+  }
+
+  const loadModels = async () => {
+    if (!window.academicOS) { onMessage('Provider setup is available in the desktop app.'); return }
+    setLoading(true)
+    try {
+      if (apiKey.trim()) {
+        await window.academicOS.providers.saveKey(provider, apiKey)
+        setApiKey(''); setHasKey(true)
+      }
+      const available = await window.academicOS.providers.listModels(provider)
+      setModels(available)
+      const savedModel = savedModels[provider]
+      if (available.length) setModel(available.some(item => item.id === savedModel) ? savedModel! : available[0].id)
+      onMessage(`${available.length} models available for this ${provider === 'openai' ? 'OpenAI' : 'Anthropic'} key.`)
+    } catch (error) { onMessage(error instanceof Error ? error.message : 'Could not load provider models.') }
+    finally { setLoading(false) }
+  }
+
+  const chooseModel = async () => {
+    if (!model) return
+    setLoading(true)
+    try {
+      const response = await fetch(`${API}/providers/${provider}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) })
+      if (!response.ok) throw new Error('The model selection could not be saved.')
+      setSavedModels(current => ({ ...current, [provider]: model }))
+      onMessage(`${models.find(item => item.id === model)?.label || model} is now the Academic Brain.`)
+    } catch (error) { onMessage(error instanceof Error ? error.message : 'Could not save the model.') }
+    finally { setLoading(false) }
+  }
+
+  return <section className="panel provider-card"><div className="provider-title"><div className="provider-icon"><Bot size={18} /></div><div><span className="eyebrow">ACADEMIC BRAIN</span><h3>Choose your model</h3><p>The picker shows models available to the API key you provide.</p></div></div><div className="provider-tabs"><button className={provider === 'openai' ? 'active' : ''} onClick={() => changeProvider('openai')}>OpenAI</button><button className={provider === 'anthropic' ? 'active' : ''} onClick={() => changeProvider('anthropic')}>Anthropic</button></div><label className="provider-field"><span><KeyRound size={13} /> API key</span><div><input type="password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={hasKey ? 'Key stored securely — enter to replace' : `Enter ${provider === 'openai' ? 'OpenAI' : 'Anthropic'} API key`} autoComplete="off" spellCheck={false} /><button onClick={loadModels} disabled={loading || (!hasKey && !apiKey.trim())}>{loading ? 'Checking…' : hasKey && !apiKey.trim() ? 'Refresh models' : 'Save & load models'}</button></div><small>Encrypted by the operating system. It is never saved in the planner database.</small></label>{models.length > 0 && <label className="provider-field"><span>Available model</span><div><select value={model} onChange={event => setModel(event.target.value)}>{models.map(item => <option value={item.id} key={item.id}>{item.label}{item.label === item.id ? '' : ` · ${item.id}`}</option>)}</select><button className="select-model" onClick={chooseModel} disabled={loading || !model}>Use model</button></div></label>}</section>
+}
+
+function SettingsView({ canvasStatus, onConnect, onMessage }: { canvasStatus: CanvasStatus; onConnect: () => void; onMessage: (message: string) => void }) {
+  return <div className="full-view"><div className="view-intro"><div><span className="eyebrow">PREFERENCES</span><h2>Shape the rules. Keep control.</h2><p>Deterministic scheduling honors these boundaries every time.</p></div></div><div className="settings-layout"><section className="panel settings-card"><div className="setting"><div><strong>Day boundary</strong><span>Study blocks may be placed between these hours.</span></div><div className="field-pair"><button>8:00 AM</button><span>to</span><button>10:00 PM</button></div></div><div className="setting"><div><strong>Maximum focus block</strong><span>Longer work is split into sustainable sessions.</span></div><button>90 minutes</button></div><div className="setting"><div><strong>Deadline safety buffer</strong><span>Finish comfortably before the real deadline.</span></div><button>12 hours</button></div><div className="setting privacy-setting"><div><strong><ShieldCheck size={15} /> Local-first privacy</strong><span>Credentials stay encrypted in the desktop vault. Models receive only the minimum task context.</span></div><b>On device</b></div><div className="integration-row"><div><span className="integration-icon">C</span><p><strong>Canvas LMS</strong><small>{canvasStatus.status === 'CONNECTED' ? 'Managed browser session connected' : 'Manual sign-in · no Canvas API token'}</small></p></div><button onClick={onConnect}>{canvasStatus.status === 'CONNECTED' ? 'Open session' : 'Connect'}</button></div></section><ModelProviderSettings onMessage={onMessage} /></div></div>
 }
 
 function CalibrationModal({ assignment, onClose, onCompleted }: { assignment: Assignment; onClose: () => void; onCompleted: (message: string) => void }) {
@@ -237,7 +305,7 @@ function App() {
     {active === 'Assignments' && <AssignmentsView assignments={data.assignments} onCalibrate={setCalibration} />}
     {active === 'Mastery' && <MasteryView />}
     {active === 'Activity' && <ActivityView events={activity} />}
-    {active === 'Settings' && <SettingsView canvasStatus={canvasStatus} onConnect={connectCanvas} />}
+    {active === 'Settings' && <SettingsView canvasStatus={canvasStatus} onConnect={connectCanvas} onMessage={setToast} />}
   </main>{calibration && <CalibrationModal assignment={calibration} onClose={() => setCalibration(null)} onCompleted={calibrationCompleted} />}{toast && <div className="toast"><Check size={16} />{toast}</div>}</div>
 }
 

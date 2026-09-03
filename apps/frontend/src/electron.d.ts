@@ -7,9 +7,10 @@ declare global {
         connect: () => Promise<{ status: 'closed' | 'opening' | 'connected' | 'auth_required' | 'error'; url?: string }>
         status: () => Promise<{ status: string; url: string | null; allowedOrigins: string[] }>
       }
-      credentials: {
-        set: (key: string, value: string) => Promise<{ stored: boolean }>
-        has: (key: string) => Promise<boolean>
+      providers: {
+        saveKey: (provider: 'openai' | 'anthropic', apiKey: string) => Promise<{ stored: boolean }>
+        hasKey: (provider: 'openai' | 'anthropic') => Promise<boolean>
+        listModels: (provider: 'openai' | 'anthropic') => Promise<{ id: string; label: string }[]>
       }
     }
   }

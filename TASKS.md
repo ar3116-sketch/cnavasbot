@@ -9,6 +9,7 @@
 - [x] Durable domain events, jobs, worker health, and activity API
 - [x] Mock Canvas → Brain → calibration → duration → schedule pipeline
 - [x] Provider/task routing foundations, usage records, and encrypted credential vault
+- [x] Secure OpenAI/Anthropic key entry and account-aware model picker
 - [x] Local MCP read tools and permission-gated semantic actions
 - [x] UI worker status, working calibration flow, and activity timeline
 
